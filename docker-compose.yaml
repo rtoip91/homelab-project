@@ -260,3 +260,27 @@ services:
       - /storage/seriale:/tv
     restart: unless-stopped
 
+  registry:
+    image: registry:latest
+    container_name: registry
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - REGISTRY_AUTH=htpasswd
+      - REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm
+      - REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd
+      - REGISTRY_STORAGE_DELETE_ENABLED=true
+    volumes:
+      - /storage/configs/registry/data:/var/lib/registry
+      - /storage/configs/registry/auth:/auth
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.registry.rule=Host(`${REGISTRY_HOST}`)"
+      - "traefik.http.routers.registry.entrypoints=websecure"
+      - "traefik.http.routers.registry.tls=true"
+      - "traefik.http.routers.registry.tls.certresolver=letsencrypt"
+      - "traefik.http.services.registry.loadbalancer.server.port=5000"
+
