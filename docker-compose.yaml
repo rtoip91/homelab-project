@@ -1,0 +1,262 @@
+networks:
+  traefik:
+    external: false
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.dns-tls.address=:853"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_LETSENCRYPT_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "853:853/tcp"
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /storage/configs/letsencrypt:/letsencrypt
+    networks:
+      - traefik
+
+  wg-easy:
+    image: weejewel/wg-easy
+    container_name: wg-easy
+    env_file:
+      - .env
+    environment:
+      - WG_HOST=${WG_HOST}
+      - PASSWORD=${WG_PASSWORD}
+      - TZ=${WG_TZ}
+    volumes:
+      - /storage/configs/wg-easy:/etc/wireguard
+    ports:
+      - 51821:51821/tcp # wg-easy web UI
+      - 51820:51820/udp # WireGuard VPN
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    networks:
+      - traefik
+
+  adguardhome:
+    image: adguard/adguardhome:latest
+    container_name: adguard
+    hostname: adguard
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /opt/stacks/adguard/work:/opt/adguardhome/work
+      - /opt/stacks/adguard/config:/opt/adguardhome/conf
+    ports:
+      - 53:53/tcp
+      - 53:53/udp
+      - 3333:80/tcp
+      - 3000:3000/tcp
+      - 784:784/udp
+      - 8853:8853/udp
+      - 5443:5443/tcp
+      - 5443:5443/udp
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.adguard-dnstls.rule=HostSNI(`${ADGUARD_DNS_HOST}`)"
+      - "traefik.tcp.routers.adguard-dnstls.entrypoints=dns-tls"
+      - "traefik.tcp.routers.adguard-dnstls.service=adguard-dnstls"
+      - "traefik.tcp.routers.adguard-dnstls.tls.certresolver=letsencrypt"
+      - "traefik.tcp.routers.adguard-dnstls.tls.passthrough=true"
+      - "traefik.tcp.services.adguard-dnstls.loadbalancer.server.port=853"
+      #admin panel
+      - "traefik.http.routers.adguard-admin.rule=Host(`${ADGUARD_ADMIN_HOST}`)"
+      - "traefik.http.routers.adguard-admin.entrypoints=websecure"
+      - "traefik.http.routers.adguard-admin.tls=true"
+      - "traefik.http.routers.adguard-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.adguard-admin.loadbalancer.server.port=80"
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    env_file:
+      - .env
+    environment:
+      - DOCKER_MODS=linuxserver/mods:jellyfin-opencl-intel
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    devices:
+       - /dev/dri:/dev/dri
+    volumes:
+      - /storage/configs/jellyfin:/config
+      - /storage/filmy:/movies
+      - /storage/seriale:/tvshows
+      - /storage/muzyka:/music
+    ports:
+      - 8096:8096
+      - 7359:7359/udp
+      - 1900:1900/udp
+    restart: unless-stopped
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyfin.rule=Host(`${JELLYFIN_HOST}`)"
+      - "traefik.http.routers.jellyfin.entrypoints=websecure"
+      - "traefik.http.routers.jellyfin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.jellyfin.loadbalancer.server.port=8096"
+      
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER}
+      - VPN_TYPE=${VPN_TYPE}
+      - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY}
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+      - WIREGUARD_ENDPOINT_IP=${WIREGUARD_ENDPOINT_IP}
+      - WIREGUARD_ENDPOINT_PORT=${WIREGUARD_ENDPOINT_PORT}
+      - VPN_DNS_ADDRESS=${VPN_DNS_ADDRESS}
+      - VPN_PORT_FORWARDING=${VPN_PORT_FORWARDING}
+      - VPN_PORT_FORWARDING_PROVIDER=${VPN_PORT_FORWARDING_PROVIDER}
+      - TZ=${GLUETUN_TZ}
+      - UPDATER_PERIOD=${UPDATER_PERIOD}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - 8888:8888/tcp # HTTP proxy
+      - 8388:8388/tcp # Shadowsocks
+      - 8388:8388/udp # Shadowsocks
+      - 7878:7878 # Radarr
+      - 8989:8989 # Sonarr
+      - 5055:5055 # Jellyseerr
+      - 6767:6767 # Prowlarr
+      - 9696:9696 # Bazarr
+      - 9091:9091 # Transmission
+    volumes:
+      - /storage/configs/gluetun:/gluetun
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyseerr.rule=Host(`${JELLYSEERR_HOST}`)"
+      - "traefik.http.routers.jellyseerr.entrypoints=websecure"
+      - "traefik.http.routers.jellyseerr.tls.certresolver=letsencrypt"
+      - "traefik.http.services.jellyseerr.loadbalancer.server.port=5055"
+
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    network_mode: service:gluetun
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+    volumes:
+      - /storage/configs/radarr:/config
+      - /storage/filmy:/movies
+      - /storage/downloads:/downloads
+    restart: unless-stopped
+  
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    network_mode: service:gluetun
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+    volumes:
+      - /storage/configs/sonarr:/config
+      - /storage/seriale:/tv
+      - /storage/downloads:/downloads
+    restart: unless-stopped
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    network_mode: service:gluetun
+    depends_on:
+      - gluetun
+    environment:
+      - TZ=Europe/Warsaw
+    volumes:
+      - /storage/configs/jellyseerr:/app/config
+    restart: unless-stopped
+
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: transmission
+    network_mode: service:gluetun
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+      - USER=${TRANSMISSION_USER}
+      - PASS=${TRANSMISSION_PASS}
+    volumes:
+      - /storage/configs/transmission:/config
+      - /storage/downloads:/downloads
+    restart: unless-stopped
+
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    network_mode: service:gluetun
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+    volumes:
+      - /storage/configs/prowlarr:/config
+    restart: unless-stopped
+
+  bazarr:
+    image: linuxserver/bazarr:latest
+    container_name: bazarr
+    network_mode: service:gluetun
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+    volumes:
+      - /storage/configs/bazarr:/config
+      - /storage/filmy:/movies
+      - /storage/seriale:/tv
+    restart: unless-stopped
+
