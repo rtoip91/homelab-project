@@ -22,6 +22,10 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.transport.respondingtimeouts.readtimeout=300s"
+      - "--entrypoints.websecure.transport.respondingtimeouts.writetimeout=300s"
+      - "--entrypoints.websecure.transport.respondingtimeouts.idletimeout=120s"
+      - "--serversTransport.maxIdleConnsPerHost=10"
     ports:
       - "80:80"
       - "443:443"
@@ -271,6 +275,12 @@ services:
       - REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm
       - REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd
       - REGISTRY_STORAGE_DELETE_ENABLED=true
+      - REGISTRY_HTTP_TIMEOUT_READ=300s
+      - REGISTRY_HTTP_TIMEOUT_WRITE=300s
+      - REGISTRY_HTTP_IDLE_TIMEOUT=120s
+      - REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR=inmemory
+      - REGISTRY_HTTP_HEADERS_X-Content-Type-Options=[nosniff]
+      - REGISTRY_HTTP_HOST=https://${REGISTRY_HOST}
     volumes:
       - /storage/configs/registry/data:/var/lib/registry
       - /storage/configs/registry/auth:/auth
@@ -283,4 +293,22 @@ services:
       - "traefik.http.routers.registry.tls=true"
       - "traefik.http.routers.registry.tls.certresolver=letsencrypt"
       - "traefik.http.services.registry.loadbalancer.server.port=5000"
+      - "traefik.http.services.registry.loadbalancer.passhostheader=true"
+
+  portfolio:
+    image: dockerregistry.mackowiak.info/portfolio:latest
+    container_name: portfolio
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portfolio.rule=Host(`${PORTFOLIO_HOST}`)"
+      - "traefik.http.routers.portfolio.entrypoints=websecure"
+      - "traefik.http.routers.portfolio.tls=true"
+      - "traefik.http.routers.portfolio.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portfolio.loadbalancer.server.port=80"
+      - "traefik.http.middlewares.size-limit.buffering.maxRequestBodyBytes=0"
 
