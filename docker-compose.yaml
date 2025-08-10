@@ -228,7 +228,7 @@ services:
       - PGID=1000
       - TZ=Europe/Warsaw
       - USER=${TRANSMISSION_USER}
-      - PASS=${TRANSMISSION_PASS}
+      - PASS=${TRANSMISSION_PASSWORD}
     volumes:
       - /storage/configs/transmission:/config
       - /storage/downloads:/downloads
@@ -311,4 +311,19 @@ services:
       - "traefik.http.routers.portfolio.tls.certresolver=letsencrypt"
       - "traefik.http.services.portfolio.loadbalancer.server.port=80"
       - "traefik.http.middlewares.size-limit.buffering.maxRequestBodyBytes=0"
+      
+  heimdall:
+    image: lscr.io/linuxserver/heimdall:latest
+    container_name: heimdall
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+    volumes:
+      - /storage/configs/heimdall:/config
+    networks:
+      - traefik
+    ports:
+      - 2222:80
 
